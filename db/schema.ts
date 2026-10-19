@@ -17,6 +17,7 @@ export const polls = sqliteTable("polls", {
   player: text("player").notNull(),
   day: integer("day").notNull(),
   options: text("options").notNull(),
+  results: text("results").notNull().default("[]"),
   active: integer("active").notNull().default(1),
   created: integer("created").notNull(),
 });

@@ -7,7 +7,7 @@ type Entry = {
   id: string; type: string; player: string; day: number; title: string;
   views: number | null; followers: number | null; note: string; created: number;
 };
-type Poll = { id: string; player: string; day: number; options: string; active: number; created: number };
+type Poll = { id: string; player: string; day: number; options: string; results: string; active: number; created: number };
 
 function db() {
   if (!env.DB) throw new Error("D1 database is unavailable");
@@ -25,15 +25,11 @@ async function isOwner() {
   const admin = env.ADMIN_EMAIL?.trim().toLowerCase();
   return Boolean(user && admin && user.email.trim().toLowerCase() === admin);
 }
-function cookieVoter(request: Request) {
-  const match = request.headers.get("cookie")?.match(/(?:^|;\s*)arena_voter=([0-9a-f-]{36})(?:;|$)/i);
-  return match?.[1] ?? null;
-}
 async function currentPoll() {
-  return db().prepare("SELECT id, player, day, options, active, created FROM polls WHERE active = 1 ORDER BY created DESC LIMIT 1").first<Poll>();
+  return db().prepare("SELECT id, player, day, options, results, active, created FROM polls WHERE active = 1 ORDER BY created DESC LIMIT 1").first<Poll>();
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const database = db();
     const [entryRows, poll, owner] = await Promise.all([
@@ -41,21 +37,14 @@ export async function GET(request: Request) {
       currentPoll(),
       isOwner(),
     ]);
-    let ballot: { index: number; pollId: string } | null = null;
     let activePoll: { id: string; player: string; day: number; options: string[]; counts: number[]; total: number } | null = null;
     if (poll) {
       const options = JSON.parse(poll.options) as string[];
-      const counts = Array(options.length).fill(0) as number[];
-      const tally = await database.prepare("SELECT choice, COUNT(*) AS count FROM votes WHERE poll_id = ? GROUP BY choice").bind(poll.id).all<{ choice: number; count: number }>();
-      for (const row of tally.results ?? []) if (row.choice >= 0 && row.choice < counts.length) counts[row.choice] = row.count;
-      const voter = cookieVoter(request);
-      if (voter) {
-        const vote = await database.prepare("SELECT choice FROM votes WHERE poll_id = ? AND voter_id = ?").bind(poll.id, voter).first<{ choice: number }>();
-        if (vote) ballot = { pollId: poll.id, index: vote.choice };
-      }
+      const saved = JSON.parse(poll.results) as number[];
+      const counts = options.map((_, index) => Number.isInteger(saved[index]) && saved[index] >= 0 ? saved[index] : 0);
       activePoll = { id: poll.id, player: poll.player, day: poll.day, options, counts, total: counts.reduce((a,b)=>a+b,0) };
     }
-    return json({ entries: entryRows.results ?? [], poll: activePoll, vote: ballot, owner, signedIn: Boolean(await getChatGPTUser()) });
+    return json({ entries: entryRows.results ?? [], poll: activePoll, owner, signedIn: Boolean(await getChatGPTUser()) });
   } catch (error) {
     console.error("Arena read failed", error);
     return json({ error: "数据暂时无法读取" }, 500);
@@ -66,11 +55,12 @@ export async function POST(request: Request) {
   let input: Record<string, unknown>;
   try { input = await request.json() as Record<string, unknown>; }
   catch { return json({ error: "请求格式不正确" }, 400); }
-  if (input.action === "vote") return vote(request, input);
+  if (input.action === "vote") return json({ error: "请在视频评论区投票" }, 410);
   if (!(await isOwner())) return json({ error: "仅管理员可修改数据，请先登录管理员账号" }, 403);
   if (input.action === "entry") return addEntry(input);
   if (input.action === "update") return updateVideo(input);
   if (input.action === "poll") return setPoll(input);
+  if (input.action === "tally") return setTally(input);
   if (input.action === "import") return importBackup(input);
   return json({ error: "未知操作" }, 400);
 }
@@ -111,20 +101,19 @@ async function setPoll(input: Record<string, unknown>) {
   const id = crypto.randomUUID();
   await database.batch([
     database.prepare("UPDATE polls SET active = 0 WHERE active = 1"),
-    database.prepare("INSERT INTO polls (id, player, day, options, active, created) VALUES (?, ?, ?, ?, 1, ?)").bind(id, player, day, JSON.stringify(options.map(x => String(x).trim())), Date.now()),
+    database.prepare("INSERT INTO polls (id, player, day, options, results, active, created) VALUES (?, ?, ?, ?, ?, 1, ?)").bind(id, player, day, JSON.stringify(options.map(x => String(x).trim())), JSON.stringify(options.map(() => 0)), Date.now()),
   ]);
   return json({ ok: true, id });
 }
 
-async function vote(request: Request, input: Record<string, unknown>) {
+async function setTally(input: Record<string, unknown>) {
   const poll = await currentPoll();
-  const choice = input.choice;
-  if (!poll || input.pollId !== poll.id) return json({ error: "本轮投票已更新，请刷新页面" }, 409);
+  if (!poll || input.pollId !== poll.id) return json({ error: "本轮候选题已更新，请刷新页面" }, 409);
   const options = JSON.parse(poll.options) as string[];
-  if (!Number.isInteger(choice) || Number(choice) < 0 || Number(choice) >= options.length) return json({ error: "请选择有效选项" }, 400);
-  const voter = cookieVoter(request) ?? crypto.randomUUID();
-  await db().prepare("INSERT INTO votes (poll_id, voter_id, choice, created) VALUES (?, ?, ?, ?) ON CONFLICT(poll_id, voter_id) DO UPDATE SET choice = excluded.choice, created = excluded.created").bind(poll.id, voter, choice, Date.now()).run();
-  return json({ ok: true }, 200, { "Set-Cookie": `arena_voter=${voter}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` });
+  const counts = input.counts;
+  if (!Array.isArray(counts) || counts.length !== options.length || !counts.every(x => Number.isInteger(x) && x >= 0 && x <= 1_000_000_000)) return json({ error: "请按候选题顺序填写非负整数票数" }, 400);
+  await db().prepare("UPDATE polls SET results = ? WHERE id = ?").bind(JSON.stringify(counts), poll.id).run();
+  return json({ ok: true });
 }
 
 async function importBackup(input: Record<string, unknown>) {
@@ -136,10 +125,11 @@ async function importBackup(input: Record<string, unknown>) {
   }
   const poll = backup.poll as Record<string, unknown> | null | undefined;
   if (poll && (!validPlayer(poll.player) || !validDay(poll.day, 1) || !Array.isArray(poll.options) || poll.options.length < 2 || poll.options.length > 3 || !poll.options.every(x=>validText(x,100)))) return json({ error: "备份中的投票格式不正确" }, 400);
+  const counts = poll && Array.isArray(poll.counts) && poll.counts.length === (poll.options as unknown[]).length && poll.counts.every(x => Number.isInteger(x) && x >= 0) ? poll.counts : poll ? (poll.options as unknown[]).map(() => 0) : [];
   const database = db();
   const statements = [database.prepare("DELETE FROM votes"), database.prepare("DELETE FROM polls"), database.prepare("DELETE FROM entries")];
   for (const e of entries) statements.push(database.prepare("INSERT INTO entries (id, type, player, day, title, views, followers, note, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), e.type, e.player, e.day, String(e.title).trim(), e.views ?? null, e.followers ?? null, e.note ?? "", Number.isFinite(e.created) ? e.created : Date.now()));
-  if (poll) statements.push(database.prepare("INSERT INTO polls (id, player, day, options, active, created) VALUES (?, ?, ?, ?, 1, ?)").bind(crypto.randomUUID(), poll.player, poll.day, JSON.stringify(poll.options), Date.now()));
+  if (poll) statements.push(database.prepare("INSERT INTO polls (id, player, day, options, results, active, created) VALUES (?, ?, ?, ?, ?, 1, ?)").bind(crypto.randomUUID(), poll.player, poll.day, JSON.stringify(poll.options), JSON.stringify(counts), Date.now()));
   await database.batch(statements);
   return json({ ok: true });
 }

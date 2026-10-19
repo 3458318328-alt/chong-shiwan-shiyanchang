@@ -1,5 +1,5 @@
 const API = '/api/arena';
-let data = { entries: [], poll: null, vote: null, owner: false, signedIn: false };
+let data = { entries: [], poll: null, owner: false, signedIn: false };
 let filter = 'all';
 function el(id) { return document.getElementById(id); }
 function fmt(value) { return Number(value).toLocaleString('zh-CN'); }
@@ -72,16 +72,17 @@ function renderPoll() {
   const box = el('vote-options'), poll = data.poll;
   if (!poll || !Array.isArray(poll.options) || poll.options.length < 2) {
     el('vote-target').textContent = '等待选题'; box.innerHTML = '';
-    el('vote-note').textContent = '阿零和时休还没有提交候选题。开赛后，在这里选下一期。'; return;
+    el('poll-counts').value = '';
+    el('vote-note').textContent = '阿零和时休还没有提交候选题。开赛后，请在视频评论区投票。'; return;
   }
   el('vote-target').textContent = `${poll.player === 'a' ? '阿零' : '时休'} · Day ${poll.day}`;
+  if (data.owner) el('poll-counts').value = poll.counts.join('\n');
   box.innerHTML = poll.options.map((option, index) => {
-    const selected = data.vote?.pollId === poll.id && data.vote.index === index;
     const count = Number(poll.counts?.[index]) || 0;
     const percent = poll.total ? Math.round(count / poll.total * 100) : 0;
-    return `<button class="vote-option ${selected ? 'selected' : ''}" data-vote="${index}"><div class="bar" style="width:${percent}%"></div><span>${String(index + 1).padStart(2,'0')}　${safe(option)}</span><small>${poll.total ? `${percent}% · ${count} 票` : '投票 ↗'}</small></button>`;
+    return `<div class="vote-option"><div class="bar" style="width:${percent}%"></div><span>${String(index + 1).padStart(2,'0')}　${safe(option)}</span><small>${poll.total ? `${percent}% · ${count} 票` : '待统计'}</small></div>`;
   }).join('');
-  el('vote-note').textContent = `本轮共 ${fmt(poll.total || 0)} 票。${data.vote?.pollId === poll.id ? '你已投票；本轮可改选。' : '每台设备本轮可投一票。'}`;
+  el('vote-note').textContent = `请在该期视频评论区回复 1 / 2 / 3 投票。这里展示人工汇总的结果，目前已录入 ${fmt(poll.total || 0)} 票。`;
 }
 function render() { renderScores(); renderEntries(); renderPoll(); }
 function renderVideoOptions() {
@@ -97,11 +98,6 @@ document.querySelectorAll('.tab').forEach(button => button.addEventListener('cli
   document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab === button));
   renderEntries();
 }));
-el('vote-options').addEventListener('click', async event => {
-  const button = event.target.closest('[data-vote]'); if (!button || !data.poll) return;
-  try { await request({ action:'vote', pollId:data.poll.id, choice:Number(button.dataset.vote) }); await refresh(); }
-  catch (error) { el('vote-note').textContent = error.message; }
-});
 const dialog = el('admin-dialog');
 el('open-admin').addEventListener('click', () => {
   if (data.owner) dialog.showModal();
@@ -137,22 +133,30 @@ el('save-poll').addEventListener('click', async () => {
   const options = el('poll-options').value.split('\n').map(value => value.trim()).filter(Boolean);
   const day = Number(el('poll-day').value);
   if (options.length < 2 || options.length > 3 || !Number.isInteger(day) || day < 1 || day > 30) { message('请输入 2～3 个候选题，以及 1～30 的截止 Day。'); return; }
-  try { await request({ action:'poll', player:el('poll-player').value, day, options }); await refresh(); message('候选题已更新，新一轮投票已开启。'); }
+  try { await request({ action:'poll', player:el('poll-player').value, day, options }); await refresh(); message('候选题已更新，请在视频结尾和评论区引导观众投票。'); }
+  catch (error) { message(error.message); }
+});
+el('save-tally').addEventListener('click', async () => {
+  if (!data.poll) { message('请先设置本轮候选题。'); return; }
+  const values = el('poll-counts').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const counts = values.map(value => Number(value));
+  if (counts.length !== data.poll.options.length || counts.some(value => !Number.isInteger(value) || value < 0)) { message(`请按候选题顺序填写 ${data.poll.options.length} 行非负整数票数。`); return; }
+  try { await request({ action:'tally', pollId:data.poll.id, counts }); await refresh(); message('评论区统计结果已更新。'); }
   catch (error) { message(error.message); }
 });
 el('export-data').addEventListener('click', () => {
-  const backup = { entries:data.entries, poll:data.poll ? { player:data.poll.player, day:data.poll.day, options:data.poll.options } : null };
+  const backup = { entries:data.entries, poll:data.poll ? { player:data.poll.player, day:data.poll.day, options:data.poll.options, counts:data.poll.counts } : null };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type:'application/json' });
   const url = URL.createObjectURL(blob), anchor = document.createElement('a');
   anchor.href = url; anchor.download = '冲十万实验场-备份.json'; anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000); message('记录备份已下载。投票只备份候选题，不包含匿名选票。');
+  setTimeout(() => URL.revokeObjectURL(url), 1000); message('记录和评论区统计结果备份已下载。');
 });
 el('import-data').addEventListener('change', async event => {
   const file = event.target.files[0]; if (!file) return;
   try {
     const backup = JSON.parse(await file.text());
     if (!Array.isArray(backup.entries)) throw Error('文件格式不正确');
-    if (!confirm('导入会替换网站当前的记录与候选题，并清空已有选票。继续吗？')) return;
+    if (!confirm('导入会替换网站当前的记录、候选题和评论区统计结果。继续吗？')) return;
     await request({ action:'import', backup }); await refresh(); message('备份已导入，所有访客将看到更新。');
   } catch (error) { message(`导入失败：${error.message}`); }
   finally { event.target.value = ''; }
