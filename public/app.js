@@ -35,7 +35,7 @@ function renderScores() {
   const published = data.entries.filter(entry => entry.type === 'published');
   const day = Math.max(0, ...data.entries.map(entry => Number(entry.day) || 0));
   el('hero-day').textContent = String(day).padStart(2, '0');
-  el('status-note').textContent = day ? `Day ${day} · 已录入 ${published.length} 条视频` : 'Day 0 · 等待首条视频发布';
+  el('status-note').textContent = day ? `Day ${day} · 已录入 ${published.length} 条参赛视频` : 'Day 0 · 主理人开场，等待 Day 1 正式出战';
   for (const player of ['a', 'b']) {
     const videos = entriesFor(player, 'published');
     const best = Math.max(0, ...videos.map(video => Number(video.views) || 0));
@@ -65,7 +65,7 @@ const typeText = { published:'视频发布', rejected:'审核打回', approved:'
 function renderEntries() {
   const items = data.entries.filter(entry => filter === 'all' || entry.player === filter).sort((a,b) => Number(b.day) - Number(a.day) || Number(b.created) - Number(a.created));
   const box = el('entries');
-  if (!items.length) { box.innerHTML = '<div class="empty"><div><b>赛场还空着。</b><p>Day 0 的人设选择和首条视频发布后，对决记录会从这里开始。</p></div></div>'; return; }
+  if (!items.length) { box.innerHTML = '<div class="empty"><div><b>赛场还空着。</b><p>Day 0 由主理人开场；从 Day 1 的首条参赛视频开始记录对决。</p></div></div>'; return; }
   box.innerHTML = items.map(entry => `<article class="entry"><span class="entry-day">DAY ${String(entry.day).padStart(2,'0')}</span><span class="entry-player ${entry.player}">${entry.player === 'a' ? '阿零' : '时休'} · ${typeText[entry.type] || '记录'}</span><div><h3>${safe(entry.title)}</h3><p>${safe(entry.note)}</p></div><span class="entry-meta">${entry.type === 'published' && entry.views !== null ? `${fmt(entry.views)} 播放` : typeText[entry.type] || ''}</span></article>`).join('');
 }
 function renderPoll() {
