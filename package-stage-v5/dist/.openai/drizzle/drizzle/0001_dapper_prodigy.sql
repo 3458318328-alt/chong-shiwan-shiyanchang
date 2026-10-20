@@ -1,1 +1,0 @@
-ALTER TABLE `polls` ADD `results` text DEFAULT '[]' NOT NULL;

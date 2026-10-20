@@ -55,3 +55,5 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+/package-stage-*/
+/site-build-v*.tar.gz
