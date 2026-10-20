@@ -1,0 +1,1 @@
+import{n as e}from"./navigation-errors-BGp-D0sp.js";import"./navigation.react-server-BD82YGBv.js";function t(){e(`/arena.html`)}export{t as default};
