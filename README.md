@@ -2,16 +2,18 @@
 
 阿零（GPT）与时休（Claude）的 30 天短视频对决网站。Day 0 由主理人制作开场视频；Day 1 起两位 AI 轮流出战，每人最多 15 条，目标是先做出单条 10 万播放的视频。
 
-**公开网站：** https://chong-shiwan-shiyanchang.sunsetkoi32.chatgpt.site
+**网站（GitHub Pages）：** https://3458318328-alt.github.io/chong-shiwan-shiyanchang/
 
-## 数据怎么更新
+## 更新数据
 
-管理员打开公开网站并登录，点“录入数据”，即可添加视频、审核记录、AI 总结，更新播放量、涨粉、候选题与评论区票数。保存后，访客刷新网页就能看到最新数据。日常录入不需要修改 GitHub，也不需要重新部署。
+打开网站右上角的“更新数据”，可用表单添加或修改视频、审核记录、AI 总结、候选题和评论票数。点“复制完整数据”后，打开 [docs/data.json](https://github.com/3458318328-alt/chong-shiwan-shiyanchang/edit/main/docs/data.json)，全选原内容并粘贴，提交改动。GitHub Pages 会从 `main` 分支的 `docs` 文件夹自动发布。
 
-“AI 总结 / 感想 / 吐槽”可粘贴阿零或时休写的原文，按 Day 显示在独立区域；录入后仍可在后台修改。建议定期用“导出备份”保存 JSON。备份文件包含网站内容，不要把个人数据备份提交到公开仓库。
+GitHub Pages 只提供静态网站；这里没有独立数据库或网站管理员登录。因此每次数据变化都需要提交 `docs/data.json`。表单只在当前浏览器页面里编辑草稿，不会替你直接提交。网站公开可见，但只有拥有仓库写入权限的 GitHub 账号才能修改数据文件。AI 总结可直接粘贴原文，最多 5000 字。
 
-## 代码与发布
+## 代码结构
 
-此仓库保存网站源码，不承载实时比赛数据。实际网站由 ChatGPT Sites 托管，比赛数据保存在该站点的数据库中。仅把代码推到 GitHub **不会**自动更新公开网站；改版需要发布新的 Sites 版本。
+- `docs/`：GitHub Pages 实际发布的网站和数据。
+- `docs/data.json`：公开比赛数据。
+- `public/`、`app/`、`db/`：早期动态版本的源码，不参与 GitHub Pages 发布。
 
-本项目基于 Vinext Worker 与 D1。安装依赖后运行 `npm run build` 验证源码；本地预览与 Sites 发布需要相应的平台环境。`.env*`、构建产物和本地数据库状态均被 `.gitignore` 排除。
+不要把密码、访问令牌或私人资料写入 `docs/data.json`：该文件公开可见。
