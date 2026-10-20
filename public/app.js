@@ -61,12 +61,18 @@ function renderScores() {
     verdict.textContent = `30 天已结束。阿零单条最高 ${fmt(a)}，时休单条最高 ${fmt(b)}。${a === b ? '目前持平，请人工确认最终规则。' : a > b ? '阿零暂居领先。' : '时休暂居领先。'}`;
   } else verdict.textContent = '谁先有单条视频达到 10 万播放，谁立即获胜。30 天无人达标，则比较各自单条最高播放。';
 }
-const typeText = { published:'视频发布', rejected:'审核打回', approved:'审核通过', reflection:'每日复盘' };
+const typeText = { published:'视频发布', rejected:'审核打回', approved:'审核通过', reflection:'AI 自述' };
 function renderEntries() {
-  const items = data.entries.filter(entry => filter === 'all' || entry.player === filter).sort((a,b) => Number(b.day) - Number(a.day) || Number(b.created) - Number(a.created));
+  const items = data.entries.filter(entry => entry.type !== 'reflection' && (filter === 'all' || entry.player === filter)).sort((a,b) => Number(b.day) - Number(a.day) || Number(b.created) - Number(a.created));
   const box = el('entries');
   if (!items.length) { box.innerHTML = '<div class="empty"><div><b>赛场还空着。</b><p>Day 0 由主理人开场；从 Day 1 的首条参赛视频开始记录对决。</p></div></div>'; return; }
   box.innerHTML = items.map(entry => `<article class="entry"><span class="entry-day">DAY ${String(entry.day).padStart(2,'0')}</span><span class="entry-player ${entry.player}">${entry.player === 'a' ? '阿零' : '时休'} · ${typeText[entry.type] || '记录'}</span><div><h3>${safe(entry.title)}</h3><p>${safe(entry.note)}</p></div><span class="entry-meta">${entry.type === 'published' && entry.views !== null ? `${fmt(entry.views)} 播放` : typeText[entry.type] || ''}</span></article>`).join('');
+}
+function renderReflections() {
+  const box = el('reflections');
+  const items = data.entries.filter(entry => entry.type === 'reflection').sort((a,b) => Number(b.day) - Number(a.day) || Number(b.created) - Number(a.created));
+  if (!items.length) { box.innerHTML = '<div class="empty"><div><b>等待他们开口。</b><p>主理人录入后，阿零和时休的原文会显示在这里。</p></div></div>'; return; }
+  box.innerHTML = items.map(entry => `<article class="reflection-card ${entry.player}"><div class="reflection-meta"><span>DAY ${String(entry.day).padStart(2,'0')}</span><strong>${entry.player === 'a' ? '阿零' : '时休'}</strong></div><h3>${safe(entry.title)}</h3><p>${safe(entry.note)}</p></article>`).join('');
 }
 function renderPoll() {
   const box = el('vote-options'), poll = data.poll;
@@ -84,13 +90,18 @@ function renderPoll() {
   }).join('');
   el('vote-note').textContent = `请在该期视频评论区回复 1 / 2 / 3 投票。这里展示人工汇总的结果，目前已录入 ${fmt(poll.total || 0)} 票。`;
 }
-function render() { renderScores(); renderEntries(); renderPoll(); }
+function render() { renderScores(); renderEntries(); renderReflections(); renderPoll(); }
 function renderVideoOptions() {
   const select = el('update-video');
   const selected = select.value;
   const videos = data.entries.filter(entry => entry.type === 'published');
   select.innerHTML = '<option value="">选择要更新的视频</option>' + videos.map(entry => `<option value="${safe(entry.id)}">Day ${entry.day} · ${entry.player === 'a' ? '阿零' : '时休'} · ${safe(entry.title)}</option>`).join('');
   if (videos.some(entry => entry.id === selected)) select.value = selected;
+  const reflectionSelect = el('update-reflection');
+  const currentReflection = reflectionSelect.value;
+  const reflections = data.entries.filter(entry => entry.type === 'reflection');
+  reflectionSelect.innerHTML = '<option value="">选择要修改的总结</option>' + reflections.map(entry => `<option value="${safe(entry.id)}">Day ${entry.day} · ${entry.player === 'a' ? '阿零' : '时休'} · ${safe(entry.title)}</option>`).join('');
+  if (reflections.some(entry => entry.id === currentReflection)) reflectionSelect.value = currentReflection;
 }
 function message(value) { el('admin-message').textContent = value; }
 document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
@@ -103,16 +114,36 @@ el('open-admin').addEventListener('click', () => {
   if (data.owner) dialog.showModal();
   else window.location.assign('/signin-with-chatgpt?return_to=%2Farena.html');
 });
+el('entry-type').addEventListener('change', () => {
+  const reflection = el('entry-type').value === 'reflection';
+  el('entry-note').maxLength = reflection ? 5000 : 500;
+  el('entry-note').rows = reflection ? 8 : 5;
+  el('entry-note').placeholder = reflection ? '直接粘贴 AI 写的总结或感想，最多 5000 字' : '记录当天实际发生的事';
+});
 el('save-entry').addEventListener('click', async () => {
   const type = el('entry-type').value, player = el('entry-player').value;
   const day = Number(el('entry-day').value), title = el('entry-title').value.trim();
   const views = el('entry-views').value, followers = el('entry-followers').value;
   const note = el('entry-note').value.trim();
   if (!title || !Number.isInteger(day) || day < 0 || day > 30) { message('请填写标题和 0～30 的 Day。'); return; }
+  if (type === 'reflection' && !note) { message('请粘贴 AI 写的正文。'); return; }
   try {
     await request({ action:'entry', type, player, day, title, views:views === '' ? null : Number(views), followers:followers === '' ? null : Number(followers), note });
     el('entry-title').value = ''; el('entry-views').value = ''; el('entry-followers').value = ''; el('entry-note').value = '';
     await refresh(); message('记录已保存，所有访客将看到更新。');
+  } catch (error) { message(error.message); }
+});
+el('update-reflection').addEventListener('change', () => {
+  const reflection = data.entries.find(entry => entry.id === el('update-reflection').value);
+  el('reflection-title').value = reflection?.title ?? '';
+  el('reflection-note').value = reflection?.note ?? '';
+});
+el('save-reflection').addEventListener('click', async () => {
+  const id = el('update-reflection').value;
+  if (!id) { message('请先选择一篇总结。'); return; }
+  try {
+    await request({ action:'updateReflection', id, title:el('reflection-title').value.trim(), note:el('reflection-note').value.trim() });
+    await refresh(); message('AI 总结已更新。');
   } catch (error) { message(error.message); }
 });
 el('update-video').addEventListener('change', () => {

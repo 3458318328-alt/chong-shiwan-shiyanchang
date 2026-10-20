@@ -59,6 +59,7 @@ export async function POST(request: Request) {
   if (!(await isOwner())) return json({ error: "仅管理员可修改数据，请先登录管理员账号" }, 403);
   if (input.action === "entry") return addEntry(input);
   if (input.action === "update") return updateVideo(input);
+  if (input.action === "updateReflection") return updateReflection(input);
   if (input.action === "poll") return setPoll(input);
   if (input.action === "tally") return setTally(input);
   if (input.action === "import") return importBackup(input);
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
 async function addEntry(input: Record<string, unknown>) {
   const type = input.type, player = input.player, day = input.day, title = input.title;
   const views = input.views, followers = input.followers, note = input.note;
-  if (!["published", "rejected", "approved", "reflection"].includes(String(type)) || !validPlayer(player) || !validDay(day) || !validText(title, 100) || !validCount(views) || !validCount(followers) || typeof note !== "string" || note.length > 500) return json({ error: "记录字段不正确" }, 400);
+  if (!["published", "rejected", "approved", "reflection"].includes(String(type)) || !validPlayer(player) || !validDay(day) || !validText(title, 100) || !validCount(views) || !validCount(followers) || typeof note !== "string" || note.length > (type === "reflection" ? 5000 : 500) || (type === "reflection" && !note.trim())) return json({ error: "记录字段不正确" }, 400);
   const database = db();
   if (type === "published") {
     const row = await database.prepare("SELECT COUNT(*) AS count FROM entries WHERE player = ? AND type = 'published'").bind(player).first<{ count: number }>();
@@ -91,6 +92,14 @@ async function updateVideo(input: Record<string, unknown>) {
   const existing = await database.prepare("SELECT id FROM entries WHERE id = ? AND type = 'published'").bind(input.id).first<{ id: string }>();
   if (!existing) return json({ error: "找不到这条视频" }, 404);
   await database.prepare("UPDATE entries SET views = ?, followers = ? WHERE id = ?").bind(input.views, input.followers, input.id).run();
+  return json({ ok: true });
+}
+
+async function updateReflection(input: Record<string, unknown>) {
+  if (typeof input.id !== "string" || input.id.length > 80 || !validText(input.title, 100) || !validText(input.note, 5000)) return json({ error: "总结内容不正确" }, 400);
+  const existing = await db().prepare("SELECT id FROM entries WHERE id = ? AND type = 'reflection'").bind(input.id).first<{ id: string }>();
+  if (!existing) return json({ error: "找不到这篇总结" }, 404);
+  await db().prepare("UPDATE entries SET title = ?, note = ? WHERE id = ?").bind(input.title.trim(), input.note.trim(), input.id).run();
   return json({ ok: true });
 }
 
@@ -121,7 +130,7 @@ async function importBackup(input: Record<string, unknown>) {
   if (!backup || !Array.isArray(backup.entries) || backup.entries.length > 200 || (backup.poll !== null && backup.poll !== undefined && typeof backup.poll !== "object")) return json({ error: "备份格式不正确" }, 400);
   const entries = backup.entries as Record<string, unknown>[];
   for (const e of entries) {
-    if (!e || !["published", "rejected", "approved", "reflection"].includes(String(e.type)) || !validPlayer(e.player) || !validDay(e.day) || !validText(e.title, 100) || !validCount(e.views ?? null) || !validCount(e.followers ?? null) || typeof (e.note ?? "") !== "string" || String(e.note ?? "").length > 500) return json({ error: "备份中有无效记录" }, 400);
+    if (!e || !["published", "rejected", "approved", "reflection"].includes(String(e.type)) || !validPlayer(e.player) || !validDay(e.day) || !validText(e.title, 100) || !validCount(e.views ?? null) || !validCount(e.followers ?? null) || typeof (e.note ?? "") !== "string" || String(e.note ?? "").length > (e.type === "reflection" ? 5000 : 500)) return json({ error: "备份中有无效记录" }, 400);
   }
   const poll = backup.poll as Record<string, unknown> | null | undefined;
   if (poll && (!validPlayer(poll.player) || !validDay(poll.day, 1) || !Array.isArray(poll.options) || poll.options.length < 2 || poll.options.length > 3 || !poll.options.every(x=>validText(x,100)))) return json({ error: "备份中的投票格式不正确" }, 400);
